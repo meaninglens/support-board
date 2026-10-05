@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>미닝월드 지원사업 보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* 레이아웃: 공고 게시판 한 단. 위에 상태 탭과 기준(필터), 아래 마감순 목록. 줄을 누르면 수집한 상세가 펼쳐진다. */
+:root {
+  --bg: #f5f6f8;
+  --paper: #ffffff;
+  --ink: #17202c;
+  --muted: #5a6475;
+  --line: #dde1e8;
+  --accent: #1f4fbf;
+  --accent-soft: #e6edfb;
+  --urgent: #c2381f;
+  --soon: #a86b12;
+  --calm: #2e7458;
+  --chip: #eef1f6;
+  --display: "Gothic A1", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141b; --paper: #161d27; --ink: #e5e9ef; --muted: #9ba5b5; --line: #2a3443;
+    --accent: #84a6f6; --accent-soft: #1f2b44; --urgent: #f17f68; --soon: #e3ad55; --calm: #63c094; --chip: #1e2733;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141b; --paper: #161d27; --ink: #e5e9ef; --muted: #9ba5b5; --line: #2a3443;
+  --accent: #84a6f6; --accent-soft: #1f2b44; --urgent: #f17f68; --soon: #e3ad55; --calm: #63c094; --chip: #1e2733;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 15px/1.6 var(--body); padding-inline: 16px; padding-block: 28px 64px; word-break: keep-all; overflow-wrap: anywhere; }
+.wrap { max-width: 920px; margin: 0 auto; display: grid; gap: 22px; }
+a { color: var(--accent); text-underline-offset: 3px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+header { display: grid; gap: 10px; }
+.stamp { font: 600 12px/1.4 var(--mono); letter-spacing: .04em; color: var(--muted); font-variant-numeric: tabular-nums; }
+h1 { margin: 0; font: 800 clamp(28px, 6vw, 40px)/1.15 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 64ch; }
+.notice { margin: 0; font-size: 13px; color: var(--soon); }
+.crawl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.crawl button { border: 0; background: var(--accent); color: var(--paper); border-radius: 8px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+.crawl button:disabled { background: var(--chip); color: var(--muted); cursor: default; }
+.crawl span { font-size: 13px; color: var(--muted); }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tab { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 6px 14px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+.tab b { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.tab[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tab[aria-pressed="true"] b { color: var(--paper); }
+
+.criteria { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; }
+.criteria h2 { margin: 0; font: 700 14px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.criteria h2 button { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; }
+.row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; align-items: start; }
+.row > span { font-size: 12px; color: var(--muted); padding-top: 5px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 13px; cursor: pointer; user-select: none; }
+.opt input { margin: 0; accent-color: var(--accent); }
+.opt:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.search { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--bg); }
+select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; background: var(--bg); }
+
+.count { font-size: 13px; color: var(--muted); margin: 0; }
+.list { list-style: none; margin: 0; padding: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
+.item + .item { border-top: 1px solid var(--line); }
+.head { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 14px; width: 100%; text-align: left; background: none; border: 0; padding: 14px 16px 14px 12px; cursor: pointer; }
+.head:hover .t { color: var(--accent); }
+.dday { display: grid; gap: 3px; align-content: start; }
+.dday .n { font: 600 19px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.dday .d { font: 500 11px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.dday.urgent .n { color: var(--urgent); } .dday.soon .n { color: var(--soon); } .dday.calm .n { color: var(--calm); }
+.dday.text .n { font: 700 13px/1.3 var(--body); color: var(--muted); }
+.main { display: grid; gap: 5px; min-width: 0; }
+.t { font-weight: 700; line-height: 1.45; }
+.o { font-size: 13px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.c { font-size: 12px; line-height: 1.4; padding: 1px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+.c.new { background: var(--accent); color: var(--paper); font-weight: 500; }
+.c.ok { color: var(--calm); background: none; border: 1px solid currentColor; }
+.c.no { color: var(--soon); background: none; border: 1px solid currentColor; }
+.c.mark { background: var(--ink); color: var(--paper); }
+.c.kw { background: var(--accent-soft); color: var(--accent); }
+
+.detail { padding: 0 16px 18px 102px; display: grid; gap: 14px; }
+.detail dl { margin: 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px 14px; font-size: 14px; }
+.detail dt { font-size: 12px; font-weight: 500; color: var(--muted); padding-top: 2px; }
+.detail dd { margin: 0; white-space: pre-line; }
+.links { display: flex; flex-wrap: wrap; gap: 14px; font-size: 14px; }
+.decide { display: grid; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.decide .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.decide button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+.decide button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.decide textarea { width: 100%; min-height: 54px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--bg); resize: vertical; }
+.decide small { color: var(--muted); font-size: 12px; }
+.empty { padding: 20px 16px; color: var(--muted); }
+.more { justify-self: center; border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 7px 18px; cursor: pointer; }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 6px; }
+footer p { margin: 0; max-width: 72ch; }
+
+@media (max-width: 560px) {
+  .head { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 14px; }
+  .dday { grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 8px; }
+  .detail { padding: 0 14px 16px; }
+  .detail dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .detail dd { margin-bottom: 8px; }
+  .row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .row > span { padding-top: 0; }
+}
+@media (prefers-reduced-motion: no-preference) { .item { transition: background-color .15s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="stamp" id="stamp">수집 정보를 불러오는 중</div>
+    <h1>미닝월드 지원사업 보드</h1>
+    <p class="lede">K-Startup, 기업마당, 위비티, 충북대 창업지원단의 진행 중 공고를 모아 둔 곳이에요. 새로 올라온 공고를 보고 관심, 지원, 패스로 정해 두면 이 브라우저에 기억돼요.</p>
+    <div class="crawl"><button type="button" id="crawl">지금 새로 모으기</button><span id="crawl-msg" aria-live="polite"></span></div>
+    <p class="notice" id="notice" hidden></p>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="결정 상태"></nav>
+
+  <section class="criteria" aria-labelledby="h-crit">
+    <h2 id="h-crit">기준 <button type="button" id="reset">처음 기준으로</button></h2>
+    <div class="row"><span>지역</span><div class="opts" id="f-region"></div></div>
+    <div class="row"><span>사업자 없이</span><div class="opts" id="f-stage"></div></div>
+    <div class="row"><span>출처</span><div class="opts" id="f-src"></div></div>
+    <div class="row"><span>우리 관련</span><div class="opts" id="f-kw"></div></div>
+    <div class="row"><span>찾기</span><div class="opts" style="width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px">
+      <input class="search" id="q" type="search" placeholder="공고 이름, 기관, 내용으로 찾기">
+      <select id="sort" aria-label="정렬"><option value="end">마감 가까운 순</option><option value="reg">최근 올라온 순</option></select>
+    </div></div>
+  </section>
+
+  <p class="count" id="count" aria-live="polite"></p>
+  <ul class="list" id="list"></ul>
+  <button type="button" class="more" id="more" hidden>더 보기</button>
+
+  <footer>
+    <p>공고 내용은 K-Startup과 기업마당 공고 페이지에서 읽어 온 거예요. 위비티는 위비티가 정리한 글이라 요약 항목과 링크만 실었어요. 지원 전에는 원문을 꼭 다시 열어 마감 시각과 자격을 확인해 주세요.</p>
+    <p>관심·지원·패스 표시와 메모는 이 브라우저에만 저장돼요. 다른 기기나 팀원에게는 보이지 않아요. 공고 목록은 누구든 "지금 새로 모으기"를 누르면 3~5분 뒤 새로 바뀌어요(10분에 한 번).</p>
+    <p>기준의 "예비 가능"은 공고에 적힌 창업 업력이나 대상 문장으로 자동 판단한 거라 틀릴 수 있어요. "확인 필요"는 공고에서 판단할 문장을 찾지 못한 경우예요.</p>
+  </footer>
+</div>
+
+<script>
+const DAY = 86400000;
+const PAGE = 60;
+const DEFAULTS = { tab: null, region: ["local"], stage: ["예비 가능", "확인 필요"], src: ["K-Startup", "기업마당", "위비티", "충북대"], kw: [], q: "", sort: "end" };
+const MARKS = [["interest", "관심"], ["apply", "지원"], ["pass", "패스"]];
+let DATA = [], marks = {}, ui = structuredClone(DEFAULTS), shown = PAGE, open = new Set(), baseline = null;
+
+const $ = id => document.getElementById(id);
+function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+function kstDay(d = new Date()) { return d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); }
+const TODAY = kstDay();
+function daysUntil(ymd) { return Math.round((new Date(ymd + "T00:00:00+09:00") - new Date(TODAY + "T00:00:00+09:00")) / DAY); }
+function isLocal(it) { return !it.region || /전국|충청북도|충북/.test(it.region); }
+function isNew(it) {
+  const recentReg = it.reg && daysUntil(it.reg) >= -7;
+  const recentSeen = it.firstSeen > baseline && daysUntil(it.firstSeen) >= -7;
+  return recentReg || recentSeen;
+}
+function markOf(it) { return marks[it.id]?.status || null; }
+function passed(it) { return it.end && daysUntil(it.end) < 0; }
+
+/* ---------- 결정 저장: 서버 없이 이 브라우저에만 ---------- */
+const store = {
+  async load() {
+    let local = {};
+    try { local = JSON.parse(localStorage.getItem("marks") || "{}"); } catch (e) {}
+    try {
+      const seed = await (await fetch("data/marks.json")).json();
+      for (const [k, v] of Object.entries(seed)) if (!(k in local)) local[k] = v;
+    } catch (e) {}
+    return local;
+  },
+  save() {
+    try { localStorage.setItem("marks", JSON.stringify(marks)); } catch (e) { showNotice("이 브라우저가 저장을 막고 있어 표시가 새로고침하면 사라져요."); }
+  }
+};
+
+/* ---------- 거르기 ---------- */
+function passCriteria(it) {
+  if (passed(it)) return false;
+  if (ui.region.includes("local") && !isLocal(it)) return false;
+  if (!ui.stage.includes(it.stage)) return false;
+  if (!ui.src.includes(it.src)) return false;
+  if (ui.kw.includes("kw") && !it.kw.length) return false;
+  if (ui.q) {
+    const hay = (it.title + " " + it.org + " " + (it.sections || []).map(s => s[1]).join(" ")).toLowerCase();
+    if (!ui.q.toLowerCase().split(/\s+/).every(w => hay.includes(w))) return false;
+  }
+  return true;
+}
+const TABS = [
+  ["new", "새 공고", it => isNew(it) && !markOf(it)],
+  ["todo", "결정 전", it => !markOf(it)],
+  ["interest", "관심", it => markOf(it) === "interest"],
+  ["apply", "지원", it => markOf(it) === "apply"],
+  ["pass", "패스", it => markOf(it) === "pass"],
+  ["all", "전체", () => true]
+];
+
+/* ---------- 그리기 ---------- */
+function opt(container, key, value, label) {
+  const l = el("label", "opt"); const i = el("input"); i.type = "checkbox"; i.checked = ui[key].includes(value);
+  i.addEventListener("change", () => { ui[key] = i.checked ? [...ui[key], value] : ui[key].filter(v => v !== value); shown = PAGE; render(); });
+  l.append(i, document.createTextNode(label)); container.append(l);
+}
+function renderCriteria() {
+  for (const id of ["f-region", "f-stage", "f-src", "f-kw"]) $(id).replaceChildren();
+  opt($("f-region"), "region", "local", "전국·충북 공고만 (다른 지역 전용 공고 빼기)");
+  const n = s => DATA.filter(it => !passed(it) && it.stage === s).length.toLocaleString();
+  opt($("f-stage"), "stage", "예비 가능", `예비 가능 ${n("예비 가능")}`);
+  opt($("f-stage"), "stage", "확인 필요", `확인 필요 ${n("확인 필요")}`);
+  opt($("f-stage"), "stage", "사업자 대상", `사업자 대상 ${n("사업자 대상")}`);
+  for (const s of ["K-Startup", "기업마당", "위비티", "충북대"]) opt($("f-src"), "src", s, `${s} ${DATA.filter(it => it.src === s && !passed(it)).length.toLocaleString()}`);
+  opt($("f-kw"), "kw", "kw", "심리·정신건강·AI·청년·대학생·공모전 같은 낱말이 있는 것만");
+  $("q").value = ui.q; $("sort").value = ui.sort;
+}
+function renderTabs(pool) {
+  $("tabs").replaceChildren();
+  if (!ui.tab) ui.tab = pool.some(TABS[0][2]) ? "new" : "todo";
+  for (const [key, label, fn] of TABS) {
+    const b = el("button", "tab"); b.type = "button"; b.setAttribute("aria-pressed", ui.tab === key);
+    b.append(document.createTextNode(label), el("b", null, pool.filter(fn).length.toLocaleString()));
+    b.addEventListener("click", () => { ui.tab = key; shown = PAGE; render(); });
+    $("tabs").append(b);
+  }
+}
+function ddayBox(it) {
+  const box = el("div", "dday");
+  if (it.end) {
+    const d = daysUntil(it.end);
+    box.classList.add(d < 0 ? "text" : d <= 7 ? "urgent" : d <= 21 ? "soon" : "calm");
+    box.append(el("span", "n", d < 0 ? "마감" : d === 0 ? "오늘" : "D-" + d), el("span", "d", it.end.slice(5).replace("-", ".") + (it.endTime ? " " + it.endTime : "")));
+  } else {
+    box.classList.add("text"); box.append(el("span", "n", it.endLabel || "기간 확인"), el("span", "d", ""));
+  }
+  return box;
+}
+function chipsOf(it) {
+  const c = el("div", "chips");
+  if (isNew(it)) c.append(el("span", "c new", "새 공고"));
+  const m = markOf(it);
+  if (m) c.append(el("span", "c mark", Object.fromEntries(MARKS)[m] + (marks[it.id].by ? " · " + marks[it.id].by : "")));
+  c.append(el("span", "c", it.src));
+  if (it.region) c.append(el("span", "c", it.region));
+  c.append(el("span", "c " + (it.stage === "예비 가능" ? "ok" : it.stage === "사업자 대상" ? "no" : ""), it.stage));
+  if (it.cat) c.append(el("span", "c", it.cat));
+  for (const k of it.kw.slice(0, 3)) c.append(el("span", "c kw", k));
+  return c;
+}
+function detailOf(it) {
+  const box = el("div", "detail");
+  const dl = el("dl");
+  const facts = [["주관", it.org], ["소관", it.ministry], ["지역", it.region], ["대상", it.target], ["대상 나이", it.age], ["창업 업력", it.career]];
+  for (const [k, v] of facts.concat(it.sections || [])) if (v) dl.append(el("dt", null, k), el("dd", null, v));
+  if (!dl.children.length) dl.append(el("dt", null, "내용"), el("dd", null, "상세 내용을 아직 받지 못했어요. 원문에서 확인해 주세요."));
+  const links = el("div", "links");
+  const a = el("a", null, "원문 공고 열기"); a.href = it.url; a.target = "_blank"; a.rel = "noopener"; links.append(a);
+  if (it.apply && it.apply !== it.url) { const b = el("a", null, "접수·홈페이지"); b.href = it.apply; b.target = "_blank"; b.rel = "noopener"; links.append(b); }
+  box.append(dl, links, decideOf(it));
+  return box;
+}
+function decideOf(it) {
+  const wrap = el("div", "decide");
+  const cur = marks[it.id] || {};
+  const btns = el("div", "btns");
+  for (const [key, label] of MARKS) {
+    const b = el("button", null, label); b.type = "button"; b.setAttribute("aria-pressed", cur.status === key);
+    b.addEventListener("click", () => decide(it, cur.status === key ? null : key, memo.value));
+    btns.append(b);
+  }
+  const memo = el("textarea"); memo.id = "memo-" + it.id; memo.placeholder = "메모 (예: 팀원 나이 확인 필요, 유빈이 초안)"; memo.value = cur.memo || "";
+  const save = el("button", null, "메모 저장"); save.type = "button";
+  save.addEventListener("click", () => decide(it, cur.status || null, memo.value));
+  btns.append(save);
+  const who = cur.at ? (cur.by ? cur.by + " · " : "") + cur.at : "";
+  wrap.append(btns, memo, el("small", null, who ? "표시: " + who : "표시하면 이 공고가 해당 탭으로 옮겨가요. 이 브라우저에만 저장돼요."));
+  return wrap;
+}
+function decide(it, status, memo) {
+  const value = { status, memo: (memo || "").trim(), at: kstDay() };
+  if (!status && !value.memo) delete marks[it.id]; else marks[it.id] = value;
+  store.save();
+  render();
+}
+function showNotice(msg) { $("notice").textContent = msg; $("notice").hidden = !msg; }
+
+function render() {
+  const pool = DATA.filter(passCriteria);
+  renderTabs(pool);
+  const fn = TABS.find(t => t[0] === ui.tab)[2];
+  const rows = pool.filter(fn).sort(ui.sort === "reg"
+    ? (a, b) => (b.reg || b.firstSeen || "").localeCompare(a.reg || a.firstSeen || "")
+    : (a, b) => (a.end || "9999").localeCompare(b.end || "9999"));
+  $("count").textContent = `기준에 맞는 공고 ${pool.length.toLocaleString()}건 중 ${rows.length.toLocaleString()}건`;
+  const ul = $("list"); ul.replaceChildren();
+  for (const it of rows.slice(0, shown)) {
+    const li = el("li", "item");
+    const head = el("button", "head"); head.type = "button"; head.setAttribute("aria-expanded", open.has(it.id));
+    const main = el("div", "main");
+    main.append(el("span", "t", it.title), el("span", "o", it.org), chipsOf(it));
+    head.append(ddayBox(it), main);
+    head.addEventListener("click", () => { open.has(it.id) ? open.delete(it.id) : open.add(it.id); render(); });
+    li.append(head);
+    if (open.has(it.id)) li.append(detailOf(it));
+    ul.append(li);
+  }
+  if (!rows.length) ul.append(el("li", "empty", ui.tab === "new" ? "새로 올라온 공고가 없어요. 결정 전 탭에서 나머지를 볼 수 있어요." : "이 기준에 맞는 공고가 없어요. 위 기준을 넓혀 보세요."));
+  $("more").hidden = rows.length <= shown;
+  $("more").textContent = `더 보기 (${(rows.length - shown).toLocaleString()}건 남음)`;
+}
+
+/* ---------- 시작 ---------- */
+$("q").addEventListener("input", e => { ui.q = e.target.value.trim(); shown = PAGE; render(); });
+$("sort").addEventListener("change", e => { ui.sort = e.target.value; render(); });
+$("more").addEventListener("click", () => { shown += PAGE; render(); });
+$("reset").addEventListener("click", () => { ui = structuredClone(DEFAULTS); shown = PAGE; renderCriteria(); render(); });
+
+async function loadData() {
+  const data = await (await fetch("data/items.json", { cache: "no-store" })).json();
+  DATA = data.items;
+  baseline = DATA.reduce((m, it) => it.firstSeen < m ? it.firstSeen : m, "9999");
+  const c = data.counts;
+  $("stamp").textContent = `${data.collectedAt.replace("T", " ")} 수집 · K-Startup ${c.kstartup} · 기업마당 ${c.bizinfo.toLocaleString()} · 위비티 ${c.wevity} · 충북대 ${c.cbnu}`;
+}
+
+/* ---------- 지금 새로 모으기: GitHub Actions 수집을 요청하고 끝날 때까지 지켜본다 ---------- */
+let polling = null;
+function crawlMsg(t) { $("crawl-msg").textContent = t; }
+async function getStatus() { return (await fetch("api/status", { cache: "no-store" })).json(); }
+function watch(since) {
+  clearInterval(polling);
+  $("crawl").disabled = true;
+  const tick = async () => {
+    let s;
+    try { s = await getStatus(); } catch (e) { return; }
+    const run = s.run;
+    const mins = Math.max(0, Math.round((Date.now() - since) / 60000));
+    if (!run || Date.parse(run.startedAt) < since - 60000) { crawlMsg("수집을 준비하고 있어요."); return; }
+    if (run.status !== "completed") { crawlMsg(`모으는 중이에요(${mins}분 지남). 보통 3~5분 걸리고, 이 화면을 열어 두면 끝날 때 바로 바뀌어요.`); return; }
+    clearInterval(polling); $("crawl").disabled = false;
+    if (run.conclusion !== "success") { crawlMsg("수집이 중간에 실패했어요. 창율에게 알려 주세요."); return; }
+    try { await loadData(); renderCriteria(); render(); crawlMsg("새로 모았어요."); } catch (e) { crawlMsg("다 모았어요. 새로고침하면 보여요."); }
+  };
+  tick(); polling = setInterval(tick, 15000);
+  setTimeout(() => { clearInterval(polling); $("crawl").disabled = false; }, 40 * 60000);
+}
+$("crawl").addEventListener("click", async () => {
+  $("crawl").disabled = true; crawlMsg("요청하는 중이에요.");
+  const since = Date.now();
+  try {
+    const r = await fetch("api/crawl", { method: "POST" });
+    const d = await r.json();
+    crawlMsg(d.message);
+    if (d.running) watch(d.run && d.run.status !== "completed" ? Date.parse(d.run.startedAt) : since);
+    else $("crawl").disabled = false;
+  } catch (e) { crawlMsg("요청하지 못했어요. 잠시 뒤 다시 눌러 주세요."); $("crawl").disabled = false; }
+});
+
+(async function start() {
+  try { await loadData(); } catch (e) { $("stamp").textContent = "공고 데이터를 불러오지 못했어요. 새로고침해 주세요."; return; }
+  marks = await store.load();
+  renderCriteria();
+  render();
+  try {
+    const s = await getStatus();
+    if (!s.connected) { $("crawl").disabled = true; crawlMsg("버튼 연결 준비 중이에요."); }
+    else if (s.run && s.run.status !== "completed") watch(Date.parse(s.run.startedAt));
+  } catch (e) { $("crawl").disabled = true; crawlMsg("버튼을 쓸 수 없는 화면이에요."); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+__pycache__/
+.wrangler/
+node_modules/
+수집/
+board.html
+*.command

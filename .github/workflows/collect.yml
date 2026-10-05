@@ -1,0 +1,28 @@
+# 사이트의 "지금 새로 모으기" 버튼이 이 실행을 요청한다. 공개 레포라 GitHub Actions 사용료가 없다.
+name: collect
+on:
+  workflow_dispatch:
+concurrency:
+  group: collect
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python collect.py
+      - name: 수집 결과 커밋
+        run: |
+          git config user.name "meaninglens0"
+          git config user.email "meaninglens0@gmail.com"
+          git add site/data/items.json data/state.json
+          git diff --cached --quiet || git commit -m "공고 수집 $(date +%F' '%H:%M)"
+          git push
