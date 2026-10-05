@@ -18,6 +18,7 @@ import pathlib
 import re
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 
 ROOT = pathlib.Path(__file__).parent
@@ -137,24 +138,32 @@ def ks_detail(url):
 
 
 # ---------- 기업마당 ----------
+def bz_page(page):
+    h = get(f"{BZ}?rows=15&cpage={page}&schEndAt=N")
+    out = []
+    for r in re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):h.find("</tbody>")], re.S):
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)
+        m = re.search(r"pblancId=(PBLN_\d+)", r)
+        if len(tds) >= 7 and m:
+            out.append(dict(id=m.group(1), cat=text(tds[1]), title=text(tds[2]), period=text(tds[3]),
+                            ministry=text(tds[4]), org=text(tds[5]), reg=text(tds[6]), url=BZD + m.group(1)))
+    return out
+
+
 def bz_list():
+    # 해외(GitHub 서버)에서는 한 쪽에 3~4초 걸려 95쪽이 6분이다. 4쪽씩 동시에 읽는다.
     items = {}
-    for page in range(1, 150):
-        h = get(f"{BZ}?rows=15&cpage={page}&schEndAt=N")
-        rows = re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):h.find("</tbody>")], re.S)
-        new = 0
-        for r in rows:
-            tds = re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)
-            m = re.search(r"pblancId=(PBLN_\d+)", r)
-            if len(tds) < 7 or not m:
-                continue
-            new += m.group(1) not in items
-            items[m.group(1)] = dict(id=m.group(1), cat=text(tds[1]), title=text(tds[2]), period=text(tds[3]),
-                                     ministry=text(tds[4]), org=text(tds[5]), reg=text(tds[6]),
-                                     url=BZD + m.group(1))
-        if new == 0 or len(rows) < 15:
-            break
-        time.sleep(0.3)
+    with ThreadPoolExecutor(4) as pool:
+        for first in range(1, 200, 4):
+            pages = list(pool.map(bz_page, range(first, first + 4)))
+            new = 0
+            for rows in pages:
+                for r in rows:
+                    new += r["id"] not in items
+                    items[r["id"]] = r
+            if new == 0 or any(len(rows) < 15 for rows in pages):
+                break
+            time.sleep(0.3)
     return list(items.values())
 
 

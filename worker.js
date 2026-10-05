@@ -31,7 +31,7 @@ async function crawl(env) {
   }
   const r = await gh(env, `/actions/workflows/${WORKFLOW}/dispatches`, { method: "POST", body: JSON.stringify({ ref: "main" }), headers: { "content-type": "application/json" } });
   if (r.status !== 204) return json({ ok: false, message: "수집을 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요." }, 502);
-  return json({ ok: true, running: true, message: "모으기 시작했어요. 보통 3~5분 걸려요." }, 202);
+  return json({ ok: true, running: true, message: "모으기 시작했어요. 보통 5~10분 걸려요." }, 202);
 }
 
 async function items(env, ctx) {
