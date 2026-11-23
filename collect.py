@@ -29,6 +29,7 @@ ITEMS = ROOT / "site" / "data" / "items.json"
 UA = {"User-Agent": "Mozilla/5.0 (meaningworld support-board; contact meaninglens0@gmail.com)"}
 KST = ZoneInfo("Asia/Seoul")
 TODAY = dt.datetime.now(KST).date().isoformat()
+START = time.time()  # Actions 40분 제한: 상세는 실행 시작 30분까지만 받는다
 
 KS = "https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do"
 BZ = "https://www.bizinfo.go.kr/sii/siia/selectSIIA200View.do"  # 2026-11 옛 주소(/web/lay1/...list.do)는 403
@@ -478,13 +479,26 @@ def binet_list():
 # ---------- 충북창조경제혁신센터: 화면이 부르는 목록 JSON ----------
 # robots.txt가 전체를 막아 두었지만 창율 결정(2026-11-23)으로 K-Startup처럼 버튼 누를 때만 진행 중 목록 한 번 읽는다.
 def ccei_list():
-    req = urllib.request.Request("https://ccei.creativekorea.or.kr/chungbuk/json/service/programLists.json",
-                                 b"sMenuType=00040001&pn=1&pagePerContents=50&sPtime=now&cntry_nm=chungbuk", UA)
-    rows = json.loads(urllib.request.urlopen(req, timeout=60).read())["result"]["list"]
-    return [_item(x["SEQ"], f"[{x['TYPE_NM']}] {x['PROGRAM_TITLE']}", "충북창조경제혁신센터",
-                  f"https://ccei.creativekorea.or.kr/chungbuk/service/program_view.do?no={x['SEQ']}&sPtime=now",
-                  reg=ymd(x.get("REG_DATE")), start=ymd(x.get("C_SDATE")), end=ymd(x.get("C_EDATE")),
-                  period=f"{x.get('C_SDATE', '')} ~ {x.get('C_EDATE', '')}") for x in rows]
+    out = []
+    for pn in range(1, 6):
+        req = urllib.request.Request("https://ccei.creativekorea.or.kr/chungbuk/json/service/programLists.json",
+                                     f"sMenuType=00040001&pn={pn}&pagePerContents=50&sPtime=now&cntry_nm=chungbuk".encode(), UA)
+        res = json.loads(urllib.request.urlopen(req, timeout=60).read())["result"]
+        for x in res["list"]:
+            if not x.get("SEQ") or not x.get("PROGRAM_TITLE"):
+                continue
+            end = ymd(x.get("C_EDATE"))
+            if end and end < TODAY:
+                continue
+            out.append(_item(x["SEQ"], f"[{x['TYPE_NM']}] {x['PROGRAM_TITLE']}" if x.get("TYPE_NM") else x["PROGRAM_TITLE"],
+                             "충북창조경제혁신센터",
+                             f"https://ccei.creativekorea.or.kr/chungbuk/service/program_view.do?no={x['SEQ']}&sPtime=now",
+                             reg=ymd(x.get("REG_DATE")), start=ymd(x.get("C_SDATE")), end=end,
+                             period=f"{x.get('C_SDATE', '')} ~ {x.get('C_EDATE', '')}"))
+        if pn * 50 >= int(res.get("size") or 0):
+            break
+        time.sleep(0.4)
+    return out
 
 
 SIDO = {"11": "서울", "26": "부산", "27": "대구", "28": "인천", "29": "광주", "30": "대전", "31": "울산", "36": "세종", "41": "경기",
@@ -492,37 +506,66 @@ SIDO = {"11": "서울", "26": "부산", "27": "대구", "28": "인천", "29": "�
 
 
 # ---------- 온통청년: 청년정책 중 일자리 > 창업 (공식 API, 키는 Actions 비밀값 YOUTHCENTER_API_KEY) ----------
+def _dates(v):
+    """'20261101 ~ 20261130', '2026-11-01~2026-11-30', 숫자 20261231 모두 YYYY-MM-DD 목록으로."""
+    return [f"{y}-{m}-{d}" for y, m, d in re.findall(r"(20\d{2})[.-]?(\d{2})[.-]?(\d{2})", str(v or ""))]
+
+
+def _youth_row(x):
+    ap = _dates(x.get("aplyYmd"))
+    pairs = list(zip(ap[::2], ap[1::2])) or [(d, d) for d in ap]
+    start, end = next(((s_, e) for s_, e in pairs if e >= TODAY), pairs[-1] if pairs else (None, None))  # 여러 차수면 아직 안 끝난 차수
+    biz_end = (_dates(x.get("bizPrdEndYmd")) or [None])[-1]
+    if (end or biz_end or "9999") < TODAY:  # 신청 마감, 신청 기간이 없으면 사업 기간이 끝난 것은 뺀다
+        return None
+    etc = (x.get("bizPrdEtcCn") or "").strip()
+    if not ap and not biz_end and (x.get("lastMdfcnDt") or x.get("frstRegDt") or "9999")[:4] < str(int(TODAY[:4]) - 1):
+        return None  # 기간이 전혀 없고 2년 넘게 손대지 않은 정책은 뺀다
+    if x.get("aplyYmd", "").strip() and not ap:
+        when = f"신청 기간: {x['aplyYmd'].strip()}"  # 못 읽은 형식은 원문 그대로
+    elif ap:
+        when = f"{start} ~ {end}"
+    else:
+        when = "상시" + (f"(사업 기간 ~{biz_end})" if biz_end else f"(사업 기간: {etc})" if etc else "")
+    ages = f"만 {x.get('sprtTrgtMinAge') or '?'}~{x.get('sprtTrgtMaxAge') or '?'}세" if x.get("sprtTrgtAgeLmtYn") != "N" else "나이 제한 없음"
+    sido = sorted({SIDO.get(z[:2], "") for z in re.findall(r"\d{5}", str(x.get("zipCd") or ""))} - {""})
+    where = "전국" if not sido or len(sido) > 3 else "·".join(sido)  # 어느 지역 정책인지 보이기만 하고 거르지는 않는다(창율 11-23)
+    return _item(x["plcyNo"], x["plcyNm"], f"{where} {x.get('sprvsnInstCdNm') or ''}".strip(),
+                 f"https://www.youthcenter.go.kr/youthPolicy/ythPlcyTotalSearch/ythPlcyDetail/{x['plcyNo']}",
+                 start=start, end=end, period=f"{when} · {ages}")
+
+
+# ---------- 온통청년: 청년정책 중 일자리 > 창업 (공식 API, 키는 Actions 비밀값 YOUTHCENTER_API_KEY) ----------
 def youthcenter_list():
     key = os.environ.get("YOUTHCENTER_API_KEY")
     if not key:
         raise RuntimeError("YOUTHCENTER_API_KEY 없음")
-    out = []
-    for page in range(1, 20):
+    out, seen = [], 0
+    for page in range(1, 30):
         url = "https://www.youthcenter.go.kr/go/ythip/getPlcy?" + urllib.parse.urlencode(
             dict(apiKeyNm=key, pageNum=page, pageSize=100, rtnType="json", lclsfNm="일자리", mclsfNm="창업"))
         for tries in range(3):  # 가끔 같은 요청에 400을 한 번 돌려준다
             try:
                 r = json.loads(get(url))["result"]
                 break
-            except urllib.error.HTTPError:
-                if tries == 2:
-                    raise
-                time.sleep(3)
-        for x in r["youthPolicyList"]:
-            ap = re.findall(r"\d{8}", x.get("aplyYmd") or "")
-            fmt = lambda d: f"{d[:4]}-{d[4:6]}-{d[6:]}" if d else None
-            start, end = (fmt(ap[0]), fmt(ap[-1])) if ap else (None, None)
-            biz_end = fmt(x.get("bizPrdEndYmd") or "")
-            if (end or biz_end or "9999") < TODAY:  # 신청 마감, 없으면 사업 기간이 끝난 것은 뺀다
-                continue
-            ages = f"만 {x.get('sprtTrgtMinAge') or '?'}~{x.get('sprtTrgtMaxAge') or '?'}세" if x.get("sprtTrgtAgeLmtYn") != "N" else "나이 제한 없음"
-            sido = sorted({SIDO.get(z[:2], "") for z in re.findall(r"\d{5}", x.get("zipCd") or "")} - {""})
-            where = "전국" if not sido or len(sido) > 3 else "·".join(sido)  # 어느 지역 정책인지 보이기만 하고 거르지는 않는다
-            out.append(_item(x["plcyNo"], x["plcyNm"], f"{where} {x.get('sprvsnInstCdNm') or ''}".strip(),
-                             f"https://www.youthcenter.go.kr/youthPolicy/ythPlcyTotalSearch/ythPlcyDetail/{x['plcyNo']}",
-                             start=start, end=end,
-                             period=(f"{start} ~ {end}" if ap else "상시" + (f"(사업 기간 ~{biz_end})" if biz_end else "")) + f" · {ages}"))
-        if page * 100 >= int(r["pagging"]["totCount"]):
+            except (urllib.error.HTTPError, ValueError, KeyError) as e:  # 가끔 JSON 대신 오류 화면(HTML)이 온다
+                if tries < 2:
+                    time.sleep(3)
+                    continue
+                msg = f"온통청년 {page}쪽 실패: {getattr(e, 'code', type(e).__name__)}"  # 오류 글에 키가 든 주소가 섞이지 않게
+                if page == 1:
+                    raise RuntimeError(msg) from None
+                print(msg + f" → 앞 {page - 1}쪽만 싣는다", flush=True)
+                return out
+        rows = r.get("youthPolicyList") or []
+        seen += len(rows)
+        for x in rows:
+            try:
+                if x.get("plcyNo") and x.get("plcyNm") and (it := _youth_row(x)):
+                    out.append(it)
+            except Exception as e:  # 한 행이 이상해도 나머지는 살린다
+                print(f"온통청년 행 건너뜀 {x.get('plcyNo')}: {type(e).__name__}", flush=True)
+        if not rows or seen >= int(r["pagging"]["totCount"]):
             break
         time.sleep(0.4)
     return out
@@ -637,9 +680,8 @@ def fetch_details(raw, state):
     jobs += [("wv:" + x["id"], wv_detail, x["url"]) for x in raw["wevity"]]
     todo = [j for j in jobs if j[0] not in det]
     print(f"상세 새로 받을 것: {len(todo)}건", flush=True)
-    t0 = time.time()
     for n, (key, fn, url) in enumerate(todo, 1):
-        if time.time() - t0 > 25 * 60:  # Actions 40분 제한 안에 커밋까지 끝내려고 끊는다. 남은 상세는 다음 실행에서 받는다
+        if time.time() - START > 30 * 60:  # Actions 40분 제한 안에 커밋까지 끝내려고 끊는다. 남은 상세는 다음 실행에서 받는다
             print(f"시간이 다 돼 {n - 1}건에서 멈춤", flush=True)
             break
         try:
