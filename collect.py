@@ -196,23 +196,26 @@ WV_CATS = (88, 1, 20)  # 취업/창업, 기획/아이디어, 웹/모바일/IT (�
 def wv_list():
     out = {}
     for cidx in WV_CATS:
-        for page in range(1, 15):  # 목록은 접수 중 → 마감 순이라, 한 쪽이 전부 마감이면 멈춘다
-            h = get(f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gp={page}")
-            live = 0
-            for li in re.findall(r'<li\s*(?:class=.bg.)?\s*><!--class="bg" -->(.*?)</li>', h, re.S):
-                a = re.search(r'href="[^"]*ix=(\d+)"[^>]*>(.*?)</a>', li, re.S)
-                day = re.search(r'<div class="day">(.*?)</div>', li, re.S)
-                day = text(day.group(1)) if day else ""
-                if not a or re.match(r"D\+\d", day) or day.endswith("마감") and "임박" not in day:
-                    continue
-                live += 1
-                org = re.search(r'<div class="organ">(.*?)</div>', li, re.S)
-                out.setdefault(a.group(1), dict(id=a.group(1), title=text(re.sub(r"<span.*?</span>", "", a.group(2))),
-                                                org=text(org.group(1)) if org else "", day=day, cat=cidx,
-                                                url=f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gbn=view&ix={a.group(1)}"))
-            if not live:
-                break
-            time.sleep(0.4)
+        try:  # 한 분야가 막혀도 나머지 분야는 싣는다
+            for page in range(1, 15):  # 목록은 접수 중 → 마감 순이라, 한 쪽이 전부 마감이면 멈춘다
+                h = get(f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gp={page}")
+                live = 0
+                for li in re.findall(r'<li\s*(?:class=.bg.)?\s*><!--class="bg" -->(.*?)</li>', h, re.S):
+                    a = re.search(r'href="[^"]*ix=(\d+)"[^>]*>(.*?)</a>', li, re.S)
+                    day = re.search(r'<div class="day">(.*?)</div>', li, re.S)
+                    day = text(day.group(1)) if day else ""
+                    if not a or re.match(r"D\+\d", day) or day.endswith("마감") and "임박" not in day:
+                        continue
+                    live += 1
+                    org = re.search(r'<div class="organ">(.*?)</div>', li, re.S)
+                    out.setdefault(a.group(1), dict(id=a.group(1), title=text(re.sub(r"<span.*?</span>", "", a.group(2))),
+                                                    org=text(org.group(1)) if org else "", day=day, cat=cidx,
+                                                    url=f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gbn=view&ix={a.group(1)}"))
+                if not live:
+                    break
+                time.sleep(0.4)
+        except Exception as e:
+            print(f"위비티 분야 {cidx} 실패: {e}", flush=True)
     return list(out.values())
 
 
@@ -677,9 +680,11 @@ def build(raw, state):
         d = det.get(key, {})
         f = d.get("fields", {})
         period = f.get("접수기간", "")
+        dd = re.match(r"D-(\d+)\s*(접수중|마감임박)", x.get("day", ""))  # 접수예정의 D-n은 시작까지 남은 날이다
+        list_end = (dt.date.fromisoformat(TODAY) + dt.timedelta(days=int(dd.group(1)))).isoformat() if dd else None
         items.append(dict(id=key, src="위비티", title=x["title"], org=f.get("주최/주관") or x["org"], url=x["url"],
                           apply=f.get("홈페이지"), reg=None, start=ymd(period.split("~")[0]) if "~" in period else None,
-                          end=ymd(period.split("~")[-1]), endTime="", region="", stage=d.get("stage", "확인 필요"),
+                          end=list_end or ymd(period.split("~")[-1]), endTime="", region="", stage=d.get("stage", "확인 필요"),
                           cat="공모전", target=f.get("응모대상", ""), wvcat=x.get("cat", 88),
                           kw=sorted(set(kw_of(x["title"]) + d.get("kw", [])), key=KEYWORDS.index),
                           sections=d.get("sections", [])))

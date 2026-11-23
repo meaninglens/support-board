@@ -178,7 +178,12 @@ function isNew(it) {
   return recentReg || recentSeen;
 }
 function markOf(it) { return marks[it.id]?.status || null; }
-function passed(it) { return it.end && daysUntil(it.end) < 0; }
+function passed(it) {
+  if (!it.end) return false;
+  const d = daysUntil(it.end);
+  if (d !== 0 || !it.endTime) return d < 0;
+  return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Seoul", hour12: false }).slice(0, 5) > it.endTime.padStart(5, "0");  // 오늘 마감은 시각까지 본다
+}
 
 /* ---------- 결정 저장: 서버 없이 이 브라우저에만 ---------- */
 const store = {
