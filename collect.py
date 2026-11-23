@@ -544,8 +544,13 @@ def build(raw, state):
                           reg=None, start=x["start"], end=x["end"], endTime="", region="충청북도", stage="확인 필요",
                           cat="대학 프로그램", target="", kw=kw_of(x["title"]), sections=[["기간", x["period"]]]))
 
+    norm = lambda t: re.sub(r"\W", "", t)
+    known = {norm(it["title"]) for it in items}  # 넥스트유니콘 등이 다시 실은 공고는 원래 출처 쪽만 남긴다
     for key, (label, region) in MORE.items():
         for x in raw[key]:
+            if norm(x["title"]) in known:
+                continue
+            known.add(norm(x["title"]))
             items.append(dict(id=f"{key}:{x['id']}", src=label, title=x["title"], org=x["org"], url=x["url"],
                               reg=x["reg"], start=x["start"], end=x["end"], endTime="", region=region,
                               stage=stage_from(x["title"]), cat="", target="", kw=kw_of(x["title"]),
