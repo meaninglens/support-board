@@ -25,7 +25,7 @@ async function crawl(env) {
   if (!env.GITHUB_TOKEN) return json({ ok: false, message: "버튼 연결이 아직 안 됐어요. 창율에게 알려 주세요." }, 503);
   const run = await lastRun(env);
   if (run && run.status !== "completed") return json({ ok: true, running: true, message: "이미 모으는 중이에요.", run });
-  if (run) {
+  if (run && run.conclusion === "success") {  // 실패한 수집 뒤에는 기다리지 않고 바로 다시 모은다
     const mins = (Date.now() - Date.parse(run.startedAt)) / 60000;
     if (mins < COOLDOWN_MIN) return json({ ok: false, message: `${Math.ceil(mins)}분 전에 모았어요. ${Math.ceil(COOLDOWN_MIN - mins)}분 뒤에 다시 눌러 주세요.`, run }, 429);
   }

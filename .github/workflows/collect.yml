@@ -27,4 +27,5 @@ jobs:
           git config user.email "meaninglens0@gmail.com"
           git add site/data/items.json data/state.json
           git diff --cached --quiet || git commit -m "공고 수집 $(date +%F' '%H:%M)"
+          git pull --rebase origin main  # 수집 중에 코드가 올라와도 결과를 잃지 않게(데이터 파일은 이 작업만 쓴다)
           git push
