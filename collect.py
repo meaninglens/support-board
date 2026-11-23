@@ -190,18 +190,30 @@ def bz_detail(url):
 
 
 # ---------- 위비티 ----------
+WV_CATS = (88, 1, 20)  # 취업/창업, 기획/아이디어, 웹/모바일/IT (창율 11-23 "위비티 그렇게 받아봐")
+
+
 def wv_list():
-    out = []
-    for page in (1, 2, 3):
-        h = get(f"{WV}?c=find&s=1&gub=1&cidx=88&gp={page}")
-        for li in re.findall(r'<li\s*(?:class=.bg.)?\s*><!--class="bg" -->(.*?)</li>', h, re.S):
-            a = re.search(r'href="[^"]*ix=(\d+)"[^>]*>(.*?)</a>', li, re.S)
-            day = re.search(r'<div class="day">(.*?)</div>', li, re.S)
-            org = re.search(r'<div class="organ">(.*?)</div>', li, re.S)
-            out.append(dict(id=a.group(1), title=text(re.sub(r"<span.*?</span>", "", a.group(2))),
-                            org=text(org.group(1)) if org else "", day=text(day.group(1)) if day else "",
-                            url=f"{WV}?c=find&s=1&gub=1&cidx=88&gbn=view&ix={a.group(1)}"))
-    return out
+    out = {}
+    for cidx in WV_CATS:
+        for page in range(1, 15):  # 목록은 접수 중 → 마감 순이라, 한 쪽이 전부 마감이면 멈춘다
+            h = get(f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gp={page}")
+            live = 0
+            for li in re.findall(r'<li\s*(?:class=.bg.)?\s*><!--class="bg" -->(.*?)</li>', h, re.S):
+                a = re.search(r'href="[^"]*ix=(\d+)"[^>]*>(.*?)</a>', li, re.S)
+                day = re.search(r'<div class="day">(.*?)</div>', li, re.S)
+                day = text(day.group(1)) if day else ""
+                if not a or re.match(r"D\+\d", day) or day.endswith("마감") and "임박" not in day:
+                    continue
+                live += 1
+                org = re.search(r'<div class="organ">(.*?)</div>', li, re.S)
+                out.setdefault(a.group(1), dict(id=a.group(1), title=text(re.sub(r"<span.*?</span>", "", a.group(2))),
+                                                org=text(org.group(1)) if org else "", day=day, cat=cidx,
+                                                url=f"{WV}?c=find&s=1&gub=1&cidx={cidx}&gbn=view&ix={a.group(1)}"))
+            if not live:
+                break
+            time.sleep(0.4)
+    return list(out.values())
 
 
 WV_FIELDS = ["분야", "응모대상", "주최/주관", "후원/협찬", "접수기간", "참가조건", "총 상금", "1등 상금", "홈페이지"]
@@ -580,6 +592,37 @@ MORE = {"startium": ("충북창업스타티움", "충청북도"), "cbckl": ("충
 LABELS = {"kstartup": "K-Startup", "bizinfo": "기업마당", "wevity": "위비티", "cbnu": "충북대"}
 
 
+# ---------- 선발형 가르기 ----------
+# 지원하고 → 심사받고 → 결과를 받는 창업 프로그램(선발형)인지 제목·분야로 가른다. 자동 판단이라 일부 틀릴 수 있다.
+NOT_SEL = re.compile(r"채용|인턴|신입사원|기간제|구직|일자리도약|평가단|위원단|서포터즈|운영기관|주관기관|수행기관|통합\s?공고|결과|입주|입점|"
+                     r"받기|받아보기|무료로|할인|상담신청|전화 상담|무료특강|템플릿|일경험")
+CORE = re.compile(r"경진대회|공모전|해커톤|솔버톤|아이디어톤|오디션|창업\s?챌린지|사관학교")
+EVT = re.compile(r"설명회|세미나|특강|밋업|네트워킹|박람회|포럼|아카데미|클래스|강의|강좌|교육생|교육과정|부트캠프|스쿨|라운지|공간|투어|행사|참관|"
+                 r"상담회|무료제공|컨퍼런스|콘퍼런스|페스티벌|축제|전시|캠프|융자|보증|정책자금|이차보전|바우처|인센티브|물류")
+SEL = re.compile(r"선발|육성|액셀러레이팅|엑셀러레이팅|액셀러레이터|엑셀러레이터|패키지|팁스|TIPS|지원사업|지원 사업|지원 프로그램|참여기업|참가기업|"
+                 r"참여팀|참가팀|참여 기업|참가 기업|참가사|스타트업 모집|창업기업 모집|창업자 모집|예비창업자|사업화|투자유치|IR|오픈이노베이션|"
+                 r"모집\s?공고|공모|\[사업공고\]")
+STARTUPISH = re.compile(r"창업|스타트업|벤처|사업화|비즈니스|해커톤|솔버톤|아이디어톤|경진대회|팁스|TIPS|액셀러")
+EVENTY_CAT = {"행사ㆍ네트워크", "시설ㆍ공간ㆍ보육", "멘토링ㆍ컨설팅ㆍ교육", "창업교육", "정책자금", "융자ㆍ보증", "인력"}
+
+
+def is_sel(it):
+    t, src = it["title"], it["src"]
+    if NOT_SEL.search(t):
+        return False
+    if src == "온통청년" and not it.get("end"):
+        return False  # 상시 정책은 지원→결과형이 아니다(창율 11-23 "빼자")
+    if src == "위비티":  # 취업/창업 분야는 그대로, 아이디어·IT 분야는 창업 성격만
+        return it.get("wvcat") == 88 or bool(STARTUPISH.search(t))
+    if src in ("기업마당", "온통청년", "청년뜨락5959") and not (it.get("cat") == "창업" or STARTUPISH.search(t)):
+        return False  # 일반 기업 지원·청년 정책이 섞인 출처는 창업 성격만
+    if CORE.search(t):
+        return True
+    if EVT.search(t) or it.get("cat") in EVENTY_CAT:
+        return False
+    return bool(SEL.search(t))
+
+
 # ---------- 정리 ----------
 def ymd(s):
     m = re.search(r"(\d{4})[.-](\d{2})[.-](\d{2})", s or "")
@@ -637,7 +680,7 @@ def build(raw, state):
         items.append(dict(id=key, src="위비티", title=x["title"], org=f.get("주최/주관") or x["org"], url=x["url"],
                           apply=f.get("홈페이지"), reg=None, start=ymd(period.split("~")[0]) if "~" in period else None,
                           end=ymd(period.split("~")[-1]), endTime="", region="", stage=d.get("stage", "확인 필요"),
-                          cat="공모전", target=f.get("응모대상", ""),
+                          cat="공모전", target=f.get("응모대상", ""), wvcat=x.get("cat", 88),
                           kw=sorted(set(kw_of(x["title"]) + d.get("kw", [])), key=KEYWORDS.index),
                           sections=d.get("sections", [])))
 
@@ -666,6 +709,8 @@ def build(raw, state):
         if secs and secs[0][0] == "개요" and secs[0][1].split("\n")[0].strip() == it["title"].strip():
             secs[0][1] = "\n".join(secs[0][1].split("\n")[1:]).strip()
         it.pop("tags", None)
+        it["sel"] = is_sel(it)
+        it.pop("wvcat", None)
         if it.get("apply") and not re.fullmatch(r"https?://[\w-]+(\.[\w-]+)+([/?#:]\S*)?", it["apply"]):
             it["apply"] = None  # 공고문이 링크 칸에 글('첨부파일' 등)을 넣은 경우
         seen.setdefault(it["id"], TODAY)
