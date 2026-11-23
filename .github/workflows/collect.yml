@@ -19,6 +19,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python collect.py
+        env:
+          YOUTHCENTER_API_KEY: ${{ secrets.YOUTHCENTER_API_KEY }}
       - name: 수집 결과 커밋
         run: |
           git config user.name "meaninglens0"

@@ -1,7 +1,7 @@
 """지원사업 공고 수집기.
 
 K-Startup(진행 중 공고와 상세), 기업마당(진행 중 공고와 상세), 위비티(취업/창업 공모전과 상세),
-충북대 창업지원단(프로그램 목록), 그 밖의 기관(MORE 표, 목록만)을 공개 웹 페이지에서 읽어 사이트용 데이터를 만든다.
+충북대 창업지원단(프로그램 목록), 그 밖의 기관(MORE 표, 목록만. 온통청년은 공식 API와 비밀값 YOUTHCENTER_API_KEY)을 읽어 사이트용 데이터를 만든다.
 API 키는 쓰지 않는다. 상세 페이지는 처음 본 공고만 받고 나머지는 `data/state.json`에 쌓아 둔다.
 
 결과:
@@ -14,9 +14,11 @@ API 키는 쓰지 않는다. 상세 페이지는 처음 본 공고만 받고 나
 import datetime as dt
 import html as H
 import json
+import os
 import pathlib
 import re
 import time
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
@@ -473,10 +475,64 @@ def binet_list():
 # 진행 공고가 사실상 없어 뺌: 아산나눔재단(공지 목록에 날짜 없음, 모집은 대부분 마감), 한국청년기업가정신재단(행사·교원 대상).
 
 
+# ---------- 충북창조경제혁신센터: 화면이 부르는 목록 JSON ----------
+# robots.txt가 전체를 막아 두었지만 창율 결정(2026-11-23)으로 K-Startup처럼 버튼 누를 때만 진행 중 목록 한 번 읽는다.
+def ccei_list():
+    req = urllib.request.Request("https://ccei.creativekorea.or.kr/chungbuk/json/service/programLists.json",
+                                 b"sMenuType=00040001&pn=1&pagePerContents=50&sPtime=now&cntry_nm=chungbuk", UA)
+    rows = json.loads(urllib.request.urlopen(req, timeout=60).read())["result"]["list"]
+    return [_item(x["SEQ"], f"[{x['TYPE_NM']}] {x['PROGRAM_TITLE']}", "충북창조경제혁신센터",
+                  f"https://ccei.creativekorea.or.kr/chungbuk/service/program_view.do?no={x['SEQ']}&sPtime=now",
+                  reg=ymd(x.get("REG_DATE")), start=ymd(x.get("C_SDATE")), end=ymd(x.get("C_EDATE")),
+                  period=f"{x.get('C_SDATE', '')} ~ {x.get('C_EDATE', '')}") for x in rows]
+
+
+SIDO = {"11": "서울", "26": "부산", "27": "대구", "28": "인천", "29": "광주", "30": "대전", "31": "울산", "36": "세종", "41": "경기",
+        "42": "강원", "51": "강원", "43": "충북", "44": "충남", "45": "전북", "52": "전북", "46": "전남", "47": "경북", "48": "경남", "50": "제주"}
+
+
+# ---------- 온통청년: 청년정책 중 일자리 > 창업 (공식 API, 키는 Actions 비밀값 YOUTHCENTER_API_KEY) ----------
+def youthcenter_list():
+    key = os.environ.get("YOUTHCENTER_API_KEY")
+    if not key:
+        raise RuntimeError("YOUTHCENTER_API_KEY 없음")
+    out = []
+    for page in range(1, 20):
+        url = "https://www.youthcenter.go.kr/go/ythip/getPlcy?" + urllib.parse.urlencode(
+            dict(apiKeyNm=key, pageNum=page, pageSize=100, rtnType="json", lclsfNm="일자리", mclsfNm="창업"))
+        for tries in range(3):  # 가끔 같은 요청에 400을 한 번 돌려준다
+            try:
+                r = json.loads(get(url))["result"]
+                break
+            except urllib.error.HTTPError:
+                if tries == 2:
+                    raise
+                time.sleep(3)
+        for x in r["youthPolicyList"]:
+            ap = re.findall(r"\d{8}", x.get("aplyYmd") or "")
+            fmt = lambda d: f"{d[:4]}-{d[4:6]}-{d[6:]}" if d else None
+            start, end = (fmt(ap[0]), fmt(ap[-1])) if ap else (None, None)
+            biz_end = fmt(x.get("bizPrdEndYmd") or "")
+            if (end or biz_end or "9999") < TODAY:  # 신청 마감, 없으면 사업 기간이 끝난 것은 뺀다
+                continue
+            ages = f"만 {x.get('sprtTrgtMinAge') or '?'}~{x.get('sprtTrgtMaxAge') or '?'}세" if x.get("sprtTrgtAgeLmtYn") != "N" else "나이 제한 없음"
+            sido = sorted({SIDO.get(z[:2], "") for z in re.findall(r"\d{5}", x.get("zipCd") or "")} - {""})
+            where = "전국" if not sido or len(sido) > 3 else "·".join(sido)  # 어느 지역 정책인지 보이기만 하고 거르지는 않는다
+            out.append(_item(x["plcyNo"], x["plcyNm"], f"{where} {x.get('sprvsnInstCdNm') or ''}".strip(),
+                             f"https://www.youthcenter.go.kr/youthPolicy/ythPlcyTotalSearch/ythPlcyDetail/{x['plcyNo']}",
+                             start=start, end=end,
+                             period=(f"{start} ~ {end}" if ap else "상시" + (f"(사업 기간 ~{biz_end})" if biz_end else "")) + f" · {ages}"))
+        if page * 100 >= int(r["pagging"]["totCount"]):
+            break
+        time.sleep(0.4)
+    return out
+
+
 # 출처 키 -> (화면 이름, 지역). 지역이 ""이면 전국·충북 거르기에 걸리지 않는다.
 MORE = {"startium": ("충북창업스타티움", "충청북도"), "cbckl": ("충북콘텐츠코리아랩", "충청북도"),
         "cbist": ("충북과학기술혁신원", "충청북도"), "youth5959": ("청년뜨락5959", "충청북도"),
         "u300": ("학생 창업유망팀 300", "전국"), "nipa": ("NIPA", "전국"),
+        "ccei": ("충북창조경제혁신센터", "충청북도"), "youthcenter": ("온통청년", ""),
         "nextunicorn": ("넥스트유니콘", ""), "binet": ("창업보육센터", "")}
 LABELS = {"kstartup": "K-Startup", "bizinfo": "기업마당", "wevity": "위비티", "cbnu": "충북대"}
 
