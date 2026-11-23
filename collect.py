@@ -1,7 +1,7 @@
 """지원사업 공고 수집기.
 
 K-Startup(진행 중 공고와 상세), 기업마당(진행 중 공고와 상세), 위비티(취업/창업 공모전과 상세),
-충북대 창업지원단(프로그램 목록)을 공개 웹 페이지에서 읽어 사이트용 데이터를 만든다.
+충북대 창업지원단(프로그램 목록), 그 밖의 기관(MORE 표, 목록만)을 공개 웹 페이지에서 읽어 사이트용 데이터를 만든다.
 API 키는 쓰지 않는다. 상세 페이지는 처음 본 공고만 받고 나머지는 `data/state.json`에 쌓아 둔다.
 
 결과:
@@ -29,7 +29,7 @@ KST = ZoneInfo("Asia/Seoul")
 TODAY = dt.datetime.now(KST).date().isoformat()
 
 KS = "https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do"
-BZ = "https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
+BZ = "https://www.bizinfo.go.kr/sii/siia/selectSIIA200View.do"  # 2026-11 옛 주소(/web/lay1/...list.do)는 403
 BZD = "https://www.bizinfo.go.kr/sii/siia/selectSIIA200Detail.do?pblancId="
 WV = "https://www.wevity.com/index.php"
 CBNU = "https://startup.cbnu.ac.kr"
@@ -235,6 +235,248 @@ def cbnu_list():
     return out
 
 
+# ---------- 그 밖의 기관: 목록만 읽는다(상세 안 받음) ----------
+NOT_NOTICE = re.compile(r"채용|결과|합격|최종\s?선발|선정\s?(안내|명단)|발표|휴관|휴무|운영 종료|입찰|낙찰|용역")
+RECENT_DAYS = 60
+
+
+def _alive(end, reg):
+    """마감을 알면 마감 안 지난 것, 모르면 등록일이 60일 안인 것."""
+    if end:
+        return end >= TODAY
+    cut = (dt.date.fromisoformat(TODAY) - dt.timedelta(days=RECENT_DAYS)).isoformat()
+    return bool(reg) and reg >= cut
+
+
+def _item(id, title, org, url, reg=None, start=None, end=None, period=""):
+    return dict(id=str(id), title=title, org=org, url=url, reg=reg, start=start, end=end, period=period)
+
+
+def _title_end(title):
+    """제목의 '~11.27', '(~10/29)' 꼴 마감일. 올해 기준, 반년 넘게 지난 날짜면 내년으로 본다."""
+    m = re.search(r"~\s*(\d{1,2})\s*[./]\s*(\d{1,2})", title)
+    if not m:
+        return None
+    today = dt.date.fromisoformat(TODAY)
+    d = dt.date(today.year, int(m.group(1)), int(m.group(2)))
+    if (today - d).days > 180:
+        d = d.replace(year=today.year + 1)
+    return d.isoformat()
+
+
+# ---------- 충북창업스타티움 (https://startium.co.kr) ----------
+# 교육신청(code=15)은 전부 '종료' 표시, 모집 공고는 공지사항(code=18)에 [홍보]/[참가자 모집] 머리말로 올라온다.
+# 2026-12-16 운영 종료 예정(공지 145번).
+def startium_list():
+    base = "https://startium.co.kr/sub.php"
+    out = {}
+    for page in (1, 2):
+        h = get(f"{base}?code=18&page={page}")
+        for r in re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):], re.S):
+            a = re.search(r'href="\?code=18&amp;mode=view&amp;no=(\d+)[^"]*"[^>]*>(.*?)</a>', r, re.S)
+            d = ymd(re.search(r"\d{4}-\d{2}-\d{2}", r).group(0)) if re.search(r"\d{4}-\d{2}-\d{2}", r) else None
+            if not a:
+                continue
+            title = text(a.group(2))
+            end = _title_end(title)
+            if NOT_NOTICE.search(title) or not _alive(end, d):
+                continue
+            out[a.group(1)] = _item("n" + a.group(1), title, "충북창업스타티움",
+                                    f"{base}?code=18&mode=view&no={a.group(1)}", reg=d, end=end)
+        time.sleep(0.4)
+    h = get(f"{base}?code=15")  # 종료 딱지(<i class="close">)가 없는 교육만
+    for li in re.findall(r'<li>\s*<div class="con_box">(.*?)</li>', h, re.S):
+        if 'class="close"' in li:
+            continue
+        no = re.search(r"no=(\d+)", li).group(1)
+        out["p" + no] = _item("p" + no, text(re.search(r'p_title">(.*?)</p>', li, re.S).group(1)), "충북창업스타티움",
+                              f"{base}?code=15&mode=view&no={no}")
+    return list(out.values())
+
+
+# ---------- 충북콘텐츠코리아랩 (https://www.cbckl.kr) ----------
+def cbckl_list():
+    base = "https://www.cbckl.kr/www/"
+    out = []
+    for page in (1, 2, 3):
+        h = get(f"{base}selectLabProgrmList.do?key=72&pageIndex={page}")
+        for r in re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):], re.S):
+            a = re.search(r'selectLabProgrmView\.do\?[^"]*labProgrmNo=(\d+)"[^>]*>(.*?)</a>', r, re.S)
+            p = re.search(r"(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})", r)
+            if not (a and p):
+                continue
+            title = text(a.group(2))
+            if "신청마감" in text(r) or p.group(2) < TODAY:
+                continue
+            out.append(_item(a.group(1), title, "충북콘텐츠코리아랩",
+                             f"{base}selectLabProgrmView.do?key=72&labProgrmNo={a.group(1)}",
+                             start=p.group(1), end=p.group(2), period=f"{p.group(1)} ~ {p.group(2)}"))
+        time.sleep(0.4)
+    return out
+
+
+# ---------- 정보통신산업진흥원 NIPA (https://www.nipa.kr/home/2-2 사업공고) ----------
+def nipa_list():
+    out = []
+    for page in (1, 2, 3):
+        h = get(f"https://www.nipa.kr/home/2-2?curPage={page}")
+        for r in re.findall(r"<tr>(.*?)</tr>", re.sub(r"<!--.*?-->", "", h[h.find("<tbody"):], flags=re.S), re.S):
+            a = re.search(r'href="(/home/2-2/(\d+))"[^>]*>(.*?)</a>', r, re.S)
+            if not a or "종료" in text(re.search(r'class="point[^"]*">(.*?)</div>', r, re.S).group(1) if re.search(r'class="point', r) else ""):
+                continue
+            p = re.search(r"신청기간\s*:\s*(\d{4}-\d{2}-\d{2})[^~]*~\s*(\d{4}-\d{2}-\d{2})", text(r))
+            biz = re.search(r'class="box[^"]*">(.*?)</span>', r, re.S)
+            end = p.group(2) if p else None
+            if end and end < TODAY:
+                continue
+            out.append(_item(a.group(2), text(a.group(3)), "NIPA" + (f" {text(biz.group(1))}" if biz else ""),
+                             "https://www.nipa.kr" + a.group(1), reg=ymd(text(r.split("</td>")[-2])) if r.count("</td>") > 1 else None,
+                             start=p.group(1) if p else None, end=end,
+                             period=f"{p.group(1)} ~ {p.group(2)}" if p else ""))
+        time.sleep(0.4)
+    return out
+
+
+# ---------- 충북과학기술혁신원 (https://www.cbist.or.kr) 사업공고 1131 + 타기관공고 1132 ----------
+def cbist_list():
+    base = "https://www.cbist.or.kr/home/sub.do"
+    out = {}
+    for mncd, org in ((1131, "충북과학기술혁신원"), (1132, "충북과학기술혁신원(타기관공고)")):
+        for page in (1, 2):
+            h = get(f"{base}?mncd={mncd}&page={page}")
+            for r in re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):h.find("</tbody>")], re.S):
+                a = re.search(r'no=(\d+)[^"]*"[^>]*class="title"[^>]*>(.*?)</a>', r, re.S)
+                d = [text(x) for x in re.findall(r'class="board_date">(.*?)</td>', r, re.S)]
+                if not (a and len(d) >= 2):
+                    continue
+                ds = re.findall(r"\d{4}-\d{2}-\d{2}", d[1])
+                start, end = (ds[0], ds[-1]) if ds else (None, None)
+                if _alive(end, d[0]) and not NOT_NOTICE.search(text(a.group(2))):
+                    out[a.group(1)] = _item(a.group(1), text(a.group(2)), org, f"{base}?mncd={mncd}&mode=view&no={a.group(1)}",
+                                            reg=d[0], start=start, end=end, period=d[1])
+            time.sleep(0.4)
+    return list(out.values())
+
+
+# ---------- 청주 청년뜨락5959 (https://www.youthspace5959.com) 청년지원사업 ----------
+def youth5959_list():
+    base = "https://www.youthspace5959.com"
+    out = []
+    for page in (1, 2):
+        h = get(f"{base}/pssrp/list.do?key=1907297637375&pageIndex={page}")
+        for no, li in re.findall(r"<li>\s*<a href=\"#none\" onclick=\"goView\('(\d+)'\);\">(.*?)</li>", h, re.S):
+            ds = re.findall(r"(\d{2})\.(\d{2})\.(\d{2})", re.search(r'class="r_date">(.*?)</span>', li, re.S).group(1))
+            ds = [f"20{y}-{m}-{d}" for y, m, d in ds]
+            title = text(re.search(r'class="tit">(.*?)</span>', li, re.S).group(1))
+            end = ds[-1] if ds else None
+            if not _alive(end, None) or not end:
+                continue
+            out.append(_item(no, title, "청주 청년뜨락5959", f"{base}/pssrp/view.do?key=1907297637375&pssrpMngKey={no}",
+                             start=ds[0], end=end, period=f"{ds[0]} ~ {end}"))
+        time.sleep(0.4)
+    return out
+
+
+# ---------- 학생 창업유망팀 300+ (https://u300.kr) 공개 JSON API ----------
+def u300_list():
+    api = "https://user-api.u300.kr/api/board/query/"
+    out = {}
+    for page in (1, 2):
+        j = json.loads(get(f"{api}get-notice-list?page={page}"))["data"]["content"]
+        for n in j:
+            title, reg = n["noticeTitle"], ymd(n["createdAt"])
+            if re.search(r"모집|공모|신청|접수", title) and not NOT_NOTICE.search(title) and _alive(None, reg):
+                out[n["noticeNo"]] = _item(n["noticeNo"], title, "학생 창업유망팀 300+",
+                                           f"https://u300.kr/board/notice/detail/{n['noticeNo']}", reg=reg)
+        time.sleep(0.4)
+    for p in json.loads(get(f"{api}program-list"))["data"]["content"]:
+        s, e = ymd(p["programRecruitStartDate"]), ymd(p["programRecruitEndDate"])
+        if e and e >= TODAY:
+            out["p%s" % p["programNo"]] = _item("p%s" % p["programNo"], p["programTitle"], "학생 창업유망팀 300+",
+                                                f"https://u300.kr/board/program/detail/{p['programNo']}", start=s, end=e,
+                                                period=f"{s} ~ {e}")
+    return list(out.values())
+
+
+# ---------- 넥스트유니콘 지원프로그램 (https://www.nextunicorn.kr/support-programs) 사이트가 쓰는 GraphQL ----------
+NU_Q = ("query($p:Int!){supportPrograms(pageNumber:$p,filter:{establishmentPeriodCodes:[],qualificationCodes:[],"
+        "applicationSectionIds:[],query:null}){supportPrograms{id hostName title applyStartAt applyEndAt "
+        "applicationSections} canApplyProgramCount}}")
+
+
+def _nu_page(p):
+    req = urllib.request.Request("https://gql.nextunicorn.kr/", json.dumps({"query": NU_Q, "variables": {"p": p}}).encode(),
+                                 {**UA, "content-type": "application/json"})
+    for _ in range(3):  # 가끔 data가 null로 온다
+        d = json.loads(urllib.request.urlopen(req, timeout=60).read())["data"]
+        if d and d["supportPrograms"]:
+            return d["supportPrograms"]
+        time.sleep(1)
+    return {"supportPrograms": [], "canApplyProgramCount": 0}
+
+
+def _kst(s):
+    return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(KST).date().isoformat() if s else None
+
+
+def nextunicorn_list():
+    # 접수 중인 것이 마감 임박순으로 먼저 나오고 그 뒤에 마감된 것이 온다. 접수 중 건수(canApplyProgramCount)까지만 읽는다.
+    out, page = {}, 1
+    while True:
+        d = _nu_page(page)
+        before = len(out)
+        for x in d["supportPrograms"]:
+            end = _kst(x["applyEndAt"])
+            if end and end < TODAY:
+                continue
+            out[x["id"]] = _item(x["id"], x["title"], x["hostName"], f"https://www.nextunicorn.kr/support-programs/{x['id']}",
+                                 start=_kst(x["applyStartAt"]), end=end, period=f"{_kst(x['applyStartAt']) or ''} ~ {end or ''}")
+        if len(out) == before or len(out) >= d["canApplyProgramCount"] or page >= 30:  # 한 쪽에 접수 중이 하나도 없으면 끝
+            return list(out.values())
+        page += 1
+        time.sleep(0.4)
+
+
+# ---------- 창업보육센터 BI-Net (옛 bi.go.kr -> https://www.smes.go.kr/binet) ----------
+# 지원사업공고(ANNOUNCE)는 전국, 입주기업모집(ENTERPRISERECRUIT)은 충청북도 센터만. 목록 제목이 20자쯤에서 '..'로 잘린다.
+def binet_list():
+    base = "https://www.smes.go.kr/binet/board/"
+    out = {}
+    for code, label in (("ANNOUNCE", "지원사업공고"), ("ENTERPRISERECRUIT", "입주기업모집")):
+        for page in range(3):
+            h = get(f"{base}list.do?boardID=RECRUIT&frefaceCode={code}&pager.offset={15 * page}")
+            for r in re.findall(r"<tr>(.*?)</tr>", h[h.find("<tbody"):h.find("</tbody>")], re.S):
+                a = re.search(r"fncEditView\((\d+),(\d+),", r)
+                tds = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)]
+                p = re.search(r"(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})", r)
+                if not (a and p and len(tds) >= 4):
+                    continue
+                region, body = tds[1], text(re.sub(r'<span class="ico_[^>]*>.*?</span>', "", r.split('class="al">')[1].split("</td>")[0], flags=re.S))
+                org = re.match(r"\[([^\]]+)\]", body)
+                if p.group(2) < TODAY or (code == "ENTERPRISERECRUIT" and region != "충청북도") or NOT_NOTICE.search(body):
+                    continue
+                out[a.group(1)] = _item(a.group(1), body, f"{org.group(1) if org else 'BI-Net'} ({label})",
+                                        f"{base}editView.do?boardID=RECRUIT&frefaceCode={code}&boardVO.postSeq={a.group(1)}"
+                                        f"&boardVO.registDate={a.group(2)}&boardVO.viewFlag=view",
+                                        reg=ymd(f"{a.group(2)[:4]}-{a.group(2)[4:6]}-{a.group(2)[6:8]}"), start=p.group(1), end=p.group(2),
+                                        period=f"{p.group(1)} ~ {p.group(2)}")
+            time.sleep(0.4)
+    return list(out.values())
+
+
+# SKIPPED (robots.txt가 User-agent: * 전체 차단이라 수집하지 않음): 충북창조경제혁신센터(ccei), 충북테크노파크(cbtp),
+# 충청북도기업진흥원(cba), 한국사회적기업진흥원(socialenterprise), 한국콘텐츠진흥원(kocca 지원공고 list.do 차단).
+# 진행 공고가 사실상 없어 뺌: 아산나눔재단(공지 목록에 날짜 없음, 모집은 대부분 마감), 한국청년기업가정신재단(행사·교원 대상).
+
+
+# 출처 키 -> (화면 이름, 지역). 지역이 ""이면 전국·충북 거르기에 걸리지 않는다.
+MORE = {"startium": ("충북창업스타티움", "충청북도"), "cbckl": ("충북콘텐츠코리아랩", "충청북도"),
+        "cbist": ("충북과학기술혁신원", "충청북도"), "youth5959": ("청년뜨락5959", "충청북도"),
+        "u300": ("학생 창업유망팀 300", "전국"), "nipa": ("NIPA", "전국"),
+        "nextunicorn": ("넥스트유니콘", ""), "binet": ("창업보육센터", "")}
+LABELS = {"kstartup": "K-Startup", "bizinfo": "기업마당", "wevity": "위비티", "cbnu": "충북대"}
+
+
 # ---------- 정리 ----------
 def ymd(s):
     m = re.search(r"(\d{4})[.-](\d{2})[.-](\d{2})", s or "")
@@ -302,11 +544,20 @@ def build(raw, state):
                           reg=None, start=x["start"], end=x["end"], endTime="", region="충청북도", stage="확인 필요",
                           cat="대학 프로그램", target="", kw=kw_of(x["title"]), sections=[["기간", x["period"]]]))
 
+    for key, (label, region) in MORE.items():
+        for x in raw[key]:
+            items.append(dict(id=f"{key}:{x['id']}", src=label, title=x["title"], org=x["org"], url=x["url"],
+                              reg=x["reg"], start=x["start"], end=x["end"], endTime="", region=region,
+                              stage=stage_from(x["title"]), cat="", target="", kw=kw_of(x["title"]),
+                              sections=[["기간", x["period"]]] if x["period"].strip(" ~") else []))
+
     for it in items:
         secs = it["sections"]
         if secs and secs[0][0] == "개요" and secs[0][1].split("\n")[0].strip() == it["title"].strip():
             secs[0][1] = "\n".join(secs[0][1].split("\n")[1:]).strip()
         it.pop("tags", None)
+        if it.get("apply") and not re.match(r"https?://[\w-]+(\.[\w-]+)+([/?#:]|$)", it["apply"]):
+            it["apply"] = None  # 공고문이 링크 칸에 글('첨부파일' 등)을 넣은 경우
         seen.setdefault(it["id"], TODAY)
         it["firstSeen"] = seen[it["id"]]
     return items
@@ -338,7 +589,8 @@ if __name__ == "__main__":
     ITEMS.parent.mkdir(parents=True, exist_ok=True)
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     raw = {}
-    for name, fn in [("kstartup", ks_list), ("bizinfo", bz_list), ("wevity", wv_list), ("cbnu", cbnu_list)]:
+    for name, fn in [("kstartup", ks_list), ("bizinfo", bz_list), ("wevity", wv_list), ("cbnu", cbnu_list)] + \
+            [(k, globals()[k + "_list"]) for k in MORE]:
         try:
             raw[name] = fn()
         except Exception as e:  # 한 곳이 막혀도 나머지는 계속한다
@@ -350,6 +602,6 @@ if __name__ == "__main__":
     state["collectedAt"] = dt.datetime.now(KST).replace(tzinfo=None).isoformat(timespec="minutes")
     STATE.write_text(json.dumps(state, ensure_ascii=False))
     ITEMS.write_text(json.dumps({"collectedAt": state["collectedAt"],
-                                 "counts": {k: len(v) for k, v in raw.items()},
+                                 "counts": {LABELS.get(k) or MORE[k][0]: len(v) for k, v in raw.items()},
                                  "items": items}, ensure_ascii=False))
     print(f"공고 {len(items)}건 → {ITEMS}", flush=True)
