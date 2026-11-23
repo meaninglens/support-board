@@ -252,16 +252,20 @@ def _item(id, title, org, url, reg=None, start=None, end=None, period=""):
     return dict(id=str(id), title=title, org=org, url=url, reg=reg, start=start, end=end, period=period)
 
 
-def _title_end(title):
-    """제목의 '~11.27', '(~10/29)' 꼴 마감일. 올해 기준, 반년 넘게 지난 날짜면 내년으로 본다."""
+def _title_end(title, reg=None):
+    """제목의 '~11.27', '(~10/29)' 꼴 마감일. 등록일(없으면 오늘)이 속한 해로 보고, 등록일보다 앞이면 다음 해로 본다."""
     m = re.search(r"~\s*(\d{1,2})\s*[./]\s*(\d{1,2})", title)
     if not m:
         return None
-    today = dt.date.fromisoformat(TODAY)
-    d = dt.date(today.year, int(m.group(1)), int(m.group(2)))
-    if (today - d).days > 180:
-        d = d.replace(year=today.year + 1)
-    return d.isoformat()
+    base = dt.date.fromisoformat(reg or TODAY)
+    for year in (base.year, base.year + 1):
+        try:
+            d = dt.date(year, int(m.group(1)), int(m.group(2)))
+        except ValueError:  # 2/29 같은 없는 날짜
+            continue
+        if d >= base - dt.timedelta(days=7):
+            return d.isoformat()
+    return None
 
 
 # ---------- 충북창업스타티움 (https://startium.co.kr) ----------
@@ -278,7 +282,7 @@ def startium_list():
             if not a:
                 continue
             title = text(a.group(2))
-            end = _title_end(title)
+            end = _title_end(title, d)
             if NOT_NOTICE.search(title) or not _alive(end, d):
                 continue
             out[a.group(1)] = _item("n" + a.group(1), title, "충북창업스타티움",
@@ -393,7 +397,7 @@ def u300_list():
         s, e = ymd(p["programRecruitStartDate"]), ymd(p["programRecruitEndDate"])
         if e and e >= TODAY:
             out["p%s" % p["programNo"]] = _item("p%s" % p["programNo"], p["programTitle"], "학생 창업유망팀 300+",
-                                                f"https://u300.kr/board/program/detail/{p['programNo']}", start=s, end=e,
+                                                f"https://u300.kr/support/programs/detail/{p['programNo']}", start=s, end=e,
                                                 period=f"{s} ~ {e}")
     return list(out.values())
 
@@ -547,21 +551,23 @@ def build(raw, state):
     norm = lambda t: re.sub(r"\W", "", t)
     known = {norm(it["title"]) for it in items}  # 넥스트유니콘 등이 다시 실은 공고는 원래 출처 쪽만 남긴다
     for key, (label, region) in MORE.items():
+        mine = set()
         for x in raw[key]:
-            if norm(x["title"]) in known:
+            if not isinstance(x.get("title"), str) or not x["title"].strip() or norm(x["title"]) in known:
                 continue
-            known.add(norm(x["title"]))
+            mine.add(norm(x["title"]))
             items.append(dict(id=f"{key}:{x['id']}", src=label, title=x["title"], org=x["org"], url=x["url"],
                               reg=x["reg"], start=x["start"], end=x["end"], endTime="", region=region,
                               stage=stage_from(x["title"]), cat="", target="", kw=kw_of(x["title"]),
                               sections=[["기간", x["period"]]] if x["period"].strip(" ~") else []))
+        known |= mine
 
     for it in items:
         secs = it["sections"]
         if secs and secs[0][0] == "개요" and secs[0][1].split("\n")[0].strip() == it["title"].strip():
             secs[0][1] = "\n".join(secs[0][1].split("\n")[1:]).strip()
         it.pop("tags", None)
-        if it.get("apply") and not re.match(r"https?://[\w-]+(\.[\w-]+)+([/?#:]|$)", it["apply"]):
+        if it.get("apply") and not re.fullmatch(r"https?://[\w-]+(\.[\w-]+)+([/?#:]\S*)?", it["apply"]):
             it["apply"] = None  # 공고문이 링크 칸에 글('첨부파일' 등)을 넣은 경우
         seen.setdefault(it["id"], TODAY)
         it["firstSeen"] = seen[it["id"]]
@@ -575,7 +581,11 @@ def fetch_details(raw, state):
     jobs += [("wv:" + x["id"], wv_detail, x["url"]) for x in raw["wevity"]]
     todo = [j for j in jobs if j[0] not in det]
     print(f"상세 새로 받을 것: {len(todo)}건", flush=True)
+    t0 = time.time()
     for n, (key, fn, url) in enumerate(todo, 1):
+        if time.time() - t0 > 25 * 60:  # Actions 40분 제한 안에 커밋까지 끝내려고 끊는다. 남은 상세는 다음 실행에서 받는다
+            print(f"시간이 다 돼 {n - 1}건에서 멈춤", flush=True)
+            break
         try:
             det[key] = fn(url)
         except Exception as e:

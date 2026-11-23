@@ -339,10 +339,12 @@ async function loadData() {
   DATA = data.items;
   baseline = DATA.reduce((m, it) => it.firstSeen < m ? it.firstSeen : m, "9999");
   const prev = SOURCES;
-  SOURCES = Object.keys(data.counts);
+  const LEGACY = { kstartup: "K-Startup", bizinfo: "기업마당", wevity: "위비티", cbnu: "충북대" };  // 2026-11 전 수집 파일의 키
+  const counts = Object.fromEntries(Object.entries(data.counts).map(([k, n]) => [LEGACY[k] || k, n]));
+  SOURCES = Object.keys(counts);
   DEFAULTS.src = [...SOURCES];
   ui.src = [...ui.src, ...SOURCES.filter(s => !prev.includes(s))];  // 새로 생긴 출처는 켜진 채로
-  $("stamp").textContent = `${data.collectedAt.replace("T", " ")} 수집 · ` + Object.entries(data.counts).map(([s, n]) => `${s} ${n.toLocaleString()}`).join(" · ");
+  $("stamp").textContent = `${data.collectedAt.replace("T", " ")} 수집 · ` + Object.entries(counts).map(([s, n]) => `${s} ${n.toLocaleString()}`).join(" · ");
 }
 
 /* ---------- 지금 새로 모으기: GitHub Actions 수집을 요청하고 끝날 때까지 지켜본다 ---------- */
